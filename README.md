@@ -1,6 +1,29 @@
-# DataSolution Viz — Tableau de bord CCR-B
+# DataSolution Viz
 
-Application Streamlit pour visualiser et analyser les données de collecte KoboToolbox du **Conseil de Concertation des Riziculteurs du Bénin (CCR-B)**.
+Application Streamlit personnelle pour visualiser et analyser des données multi-sources (KoboToolbox, Excel, CSV, texte).
+
+## Sources de données
+
+| Mode | Description |
+|------|-------------|
+| **URL API KoboToolbox** | URL d'export prédéfinie ou personnalisée (.xlsx / .csv) |
+| **Fichier Excel** | Import `.xlsx` avec détection automatique des en-têtes |
+| **Fichier CSV** | Import `.csv` — première ligne = en-têtes |
+| **Texte simple** | Coller des données tabulaires (CSV, `;`, tabulation) |
+
+## Déploiement Streamlit Cloud
+
+- **Repository** : `Sidoine1991/DataSolution_viz`
+- **Branch** : `main`
+- **Main file** : `dashboard_app.py`
+- **Secrets** : `GOOGLE_API_KEY` (pour le chat Gemini)
+
+## Fichiers requis
+
+- `dashboard_app.py` — application principale
+- `logo_sky.png` — logo DataSolution
+- `report_template.html` — template rapport HTML
+- `requirements.txt` — dépendances
 
 ## Fonctionnalités
 

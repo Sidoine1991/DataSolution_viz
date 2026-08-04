@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
+import re
+from io import StringIO
 import plotly.express as px
 from datetime import datetime
 from jinja2 import Environment, FileSystemLoader
@@ -16,39 +18,124 @@ import os
 from dotenv import load_dotenv
 import google.generativeai as genai
 
-# Load environment variables from .env file
+# --- Configuration produit ---
+APP_NAME = "DataSolution Viz"
+APP_TAGLINE = "Solution digitale d'analyse et de visualisation de données"
+LOGO_PATH = "logo_sky.png"
+LOGO_FALLBACK = r"C:\Users\USER\OneDrive\Images\logo_sky.png"
+
 load_dotenv()
 
-# Configure the Google Gemini API
 google_api_key = os.getenv("GOOGLE_API_KEY")
 if google_api_key:
     genai.configure(api_key=google_api_key)
-else:
-    st.error("Clé API Google Gemini non trouvée. Veuillez la définir dans le fichier .env comme GOOGLE_API_KEY.")
 
-
-# URLs des collectes
+# URLs KoboToolbox prédéfinies (optionnelles)
 urls = {
     "Enquête 1: Diagnostic rapide des coopératives": "https://eu.kobotoolbox.org/api/v2/assets/aX8mpWRZaVBomEs3jZ5ULR/export-settings/esp68CyMYKKrHVSPDhwGc2X/data.xlsx",
     "Collecte 2: Unité de démonstration/application": "https://eu.kobotoolbox.org/api/v2/assets/aqKsjwyNuGzbwxWHkUeRjj/export-settings/escMDPrVnDBqMdzxBW8Cn3C/data.xlsx",
-    "Collecte 3: Diagnostic des coopératives (PDA 4)": "https://eu.kobotoolbox.org/api/v2/assets/adHBEPncaoH7ShGzCaRZoo/export-settings/esnTMAAYFxPGqwCcwuPpKyA/data.xlsx"
+    "Collecte 3: Diagnostic des coopératives (PDA 4)": "https://eu.kobotoolbox.org/api/v2/assets/adHBEPncaoH7ShGzCaRZoo/export-settings/esnTMAAYFxPGqwCcwuPpKyA/data.xlsx",
 }
 
-@st.cache_data(ttl=600) # Cache data for 10 minutes
-def load_data(url):
-    """Fetches data from a given URL and returns a pandas DataFrame."""
+
+def get_logo_path():
+    if os.path.exists(LOGO_PATH):
+        return LOGO_PATH
+    if os.path.exists(LOGO_FALLBACK):
+        return LOGO_FALLBACK
+    return None
+
+
+def normalize_dataframe(df):
+    """Normalise les en-têtes et prépare le DataFrame pour l'analyse."""
+    if df is None or df.empty:
+        return None
+
+    new_columns = []
+    seen = set()
+    for col in df.columns:
+        cleaned = str(col).split("/")[-1].strip()
+        cleaned = re.sub(r"[^\w\s-]", "", cleaned).strip()
+        cleaned = re.sub(r"[-\s]+", "_", cleaned).lower() or "colonne"
+        base = cleaned
+        counter = 1
+        while cleaned in seen:
+            cleaned = f"{base}_{counter}"
+            counter += 1
+        seen.add(cleaned)
+        new_columns.append(cleaned)
+    df = df.copy()
+    df.columns = new_columns
+
+    df = df.drop(columns=[c for c in df.columns if c.startswith("unnamed")], errors="ignore")
+
+    if "_index" not in df.columns:
+        for candidate in ("_index", "index", "id", "formhub_uuid"):
+            if candidate in df.columns:
+                df["_index"] = df[candidate].astype(str)
+                break
+        else:
+            df["_index"] = df.index.astype(str)
+
+    return df
+
+
+def store_loaded_data(df, source_label=""):
+    if df is not None:
+        st.session_state.dataframe_to_export = df
+        if source_label:
+            st.session_state.current_source_label = source_label
+    return df
+
+
+def detect_text_separator(text):
+    first_line = text.strip().splitlines()[0] if text.strip() else ""
+    if "\t" in first_line:
+        return "\t"
+    if ";" in first_line and "," not in first_line:
+        return ";"
+    return ","
+
+
+@st.cache_data(ttl=600)
+def load_data_from_url(url):
+    """Charge les données depuis une URL KoboToolbox (Excel)."""
     try:
-        response = requests.get(url)
-        response.raise_for_status() # Raise an exception for bad status codes
-        # Assuming the API returns an Excel file
-        df = pd.read_excel(io.BytesIO(response.content))
-        return df
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        }
+        response = requests.get(url, headers=headers, timeout=60)
+        response.raise_for_status()
+        if url.lower().endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(response.content))
+        else:
+            df = pd.read_excel(io.BytesIO(response.content), engine="openpyxl")
+        return normalize_dataframe(df)
     except requests.exceptions.RequestException as e:
-        st.error(f"Erreur lors du chargement des données depuis {url}: {e}")
+        st.error(f"Erreur réseau lors du chargement depuis {url}: {e}")
         return None
     except Exception as e:
-        st.error(f"Une erreur est survenue lors du traitement du fichier Excel depuis {url}: {e}")
+        st.error(f"Erreur lors du traitement des données depuis {url}: {e}")
         return None
+
+
+def load_data_from_excel(uploaded_file):
+    df = pd.read_excel(uploaded_file, engine="openpyxl")
+    return normalize_dataframe(df)
+
+
+def load_data_from_csv(uploaded_file):
+    df = pd.read_csv(uploaded_file)
+    return normalize_dataframe(df)
+
+
+def load_data_from_text(raw_text, separator=None):
+    if not raw_text or not raw_text.strip():
+        st.warning("Veuillez coller des données tabulaires (première ligne = en-têtes).")
+        return None
+    sep = separator or detect_text_separator(raw_text)
+    df = pd.read_csv(StringIO(raw_text.strip()), sep=sep, header=0)
+    return normalize_dataframe(df)
 
 # Charger le template HTML
 env = Environment(loader=FileSystemLoader('.'))
@@ -66,22 +153,22 @@ def generate_html_report(data, num_submissions, columns, tables_html="", charts_
     )
     return html_content
 
-# Display organization logo and name
+logo_path = get_logo_path()
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    st.image("PP CCRB.png", width=100)
-st.markdown("<h1 style='text-align: center;'>Conseil de Concertation des Riziculteurs du Bénin (CCR-B)</h1>", unsafe_allow_html=True)
-st.markdown("<h2 style='text-align: center;'>Tableau de bord des collectes KoboToolbox</h2>", unsafe_allow_html=True)
+    if logo_path:
+        st.image(logo_path, width=120)
+    else:
+        st.warning("Logo non trouvé (logo_sky.png)")
+st.markdown(f"<h1 style='text-align: center;'>{APP_NAME}</h1>", unsafe_allow_html=True)
+st.markdown(f"<h2 style='text-align: center;'>{APP_TAGLINE}</h2>", unsafe_allow_html=True)
 
-# Add descriptive text
 st.markdown(
     """
     <div style='border: 1px solid #ccc; padding: 15px; border-radius: 10px; margin-bottom: 20px; color: #000;'>
-        <p>Ce rapport est un rapport électronique basé sur les données synchronisées en temps réel depuis les plateformes de collecte de l'organisation.
-        Il a été conçu pour faciliter une exploitation primaire de ces données et alimenter le cadre de suivi des conventions au niveau de l'organisation. 
-        Il ne remplace pas les analyses approfondies et les interprétations qui devraient être effectuées par des experts en statistique et en analyse de données.</p>
-        <p>Pour toute question ou assistance, veuillez contacter l'Equipe Technique du CCR-B.</p>
-        <p>Pour toute question ou assistance, veuillez contacter l'Equipe Technique du CCR-B/ Responsable Suivi Evaluation.</p>
+        <p>Plateforme d'analyse de données multi-sources : API KoboToolbox, Excel, CSV ou texte tabulaire.
+        À l'import, l'application détecte automatiquement les en-têtes et structure le DataFrame pour l'analyse.</p>
+        <p>Produit DataSolution — analyse, visualisation et export de vos collectes.</p>
     </div>
     """, unsafe_allow_html=True
 )
@@ -96,40 +183,86 @@ with app_tab:
     # Add a sidebar for controls
     st.sidebar.header("Configuration")
 
-    # Add a radio button to select data source mode
     data_source_mode = st.sidebar.radio(
         "Sélectionnez la source de données :",
-        ('Mode API KoboToolbox', 'Mode Fichier Local')
+        ("URL API KoboToolbox", "Fichier Excel", "Fichier CSV", "Texte simple"),
     )
 
-    # Add a selectbox for collection selection (only in API mode)
     selected_collection_name = None
     uploaded_file = None
     data = None
+    source_label = st.session_state.get("current_source_label", "Données")
 
-    if data_source_mode == 'Mode API KoboToolbox':
-        selected_collection_name = st.sidebar.selectbox(
-            "Sélectionnez une collecte:",
-            list(urls.keys())
+    if data_source_mode == "URL API KoboToolbox":
+        url_mode = st.sidebar.radio(
+            "Type d'URL :",
+            ("Collecte prédéfinie", "URL personnalisée"),
         )
-        # Get the URL for the selected collection
-        if selected_collection_name:
-            selected_url = urls[selected_collection_name]
-            st.header(selected_collection_name)
-            data = load_data(selected_url)
-            if data is not None:
-                st.session_state.dataframe_to_export = data # Store for export
+        if url_mode == "Collecte prédéfinie":
+            selected_collection_name = st.sidebar.selectbox(
+                "Sélectionnez une collecte :",
+                list(urls.keys()),
+            )
+            selected_url = urls.get(selected_collection_name, "")
+        else:
+            selected_collection_name = "URL personnalisée"
+            selected_url = st.sidebar.text_input(
+                "URL d'export KoboToolbox (.xlsx ou .csv)",
+                placeholder="https://eu.kobotoolbox.org/api/v2/assets/.../data.xlsx",
+            )
 
-    elif data_source_mode == 'Mode Fichier Local':
-        st.header("Charger un fichier local")
-        uploaded_file = st.file_uploader("Déposez votre fichier Excel ici", type=["xlsx"])
+        st.header(selected_collection_name or "Chargement API KoboToolbox")
+        if selected_url:
+            data = load_data_from_url(selected_url)
+            if data is not None:
+                label = selected_collection_name or f"URL: {selected_url[:50]}..."
+                store_loaded_data(data, label)
+                st.success(f"Données chargées : {len(data)} lignes, {len(data.columns)} colonnes")
+                source_label = st.session_state.get("current_source_label", label)
+
+    elif data_source_mode == "Fichier Excel":
+        st.header("Charger un fichier Excel")
+        uploaded_file = st.file_uploader("Déposez votre fichier Excel (.xlsx)", type=["xlsx"])
         if uploaded_file is not None:
             try:
-                data = pd.read_excel(uploaded_file)
-                st.success("Fichier chargé avec succès!")
-                st.session_state.dataframe_to_export = data # Store for export
+                data = load_data_from_excel(uploaded_file)
+                store_loaded_data(data, f"Excel: {uploaded_file.name}")
+                st.success("Fichier Excel chargé — en-têtes détectés automatiquement.")
+                source_label = st.session_state.get("current_source_label", uploaded_file.name)
             except Exception as e:
-                st.error(f"Erreur lors du chargement du fichier : {e}")
+                st.error(f"Erreur lors du chargement Excel : {e}")
+
+    elif data_source_mode == "Fichier CSV":
+        st.header("Charger un fichier CSV")
+        uploaded_file = st.file_uploader("Déposez votre fichier CSV (.csv)", type=["csv"])
+        if uploaded_file is not None:
+            try:
+                data = load_data_from_csv(uploaded_file)
+                store_loaded_data(data, f"CSV: {uploaded_file.name}")
+                st.success("Fichier CSV chargé — en-têtes détectés automatiquement.")
+                source_label = st.session_state.get("current_source_label", uploaded_file.name)
+            except Exception as e:
+                st.error(f"Erreur lors du chargement CSV : {e}")
+
+    elif data_source_mode == "Texte simple":
+        st.header("Coller des données tabulaires")
+        st.caption("Collez vos données : la première ligne sera utilisée comme en-têtes de colonnes.")
+        raw_text = st.text_area(
+            "Données (CSV, point-virgule ou tabulation)",
+            height=200,
+            placeholder="nom,age,ville\nAlice,30,Cotonou\nBob,25,Parakou",
+        )
+        text_sep = st.selectbox("Séparateur (auto si vide)", ["Auto", ",", ";", "Tabulation"], index=0)
+        if st.button("Charger le texte", type="primary"):
+            sep_map = {"Auto": None, ",": ",", ";": ";", "Tabulation": "\t"}
+            try:
+                data = load_data_from_text(raw_text, separator=sep_map[text_sep])
+                if data is not None:
+                    store_loaded_data(data, "Texte simple")
+                    st.success(f"DataFrame créé : {len(data)} lignes, {len(data.columns)} colonnes")
+                    source_label = st.session_state.get("current_source_label", "Texte simple")
+            except Exception as e:
+                st.error(f"Erreur lors de la lecture du texte : {e}")
 
     # Add a manual refresh button
     if st.sidebar.button("Actualiser les données"):
@@ -170,7 +303,7 @@ with app_tab:
                 st.sidebar.download_button(
                     label="Télécharger le fichier CSV",
                     data=csv_data,
-                    file_name=f"{selected_collection_name if selected_collection_name else 'local_file'}_export.csv",
+                    file_name=f"{source_label.replace(' ', '_')}_export.csv",
                     mime="text/csv",
                     key=f"download_csv_{selected_collection_name if selected_collection_name else 'local'}"
                 )
@@ -186,7 +319,7 @@ with app_tab:
                 st.sidebar.download_button(
                     label="Télécharger le fichier Excel",
                     data=excel_buffer,
-                    file_name=f"{selected_collection_name if selected_collection_name else 'local_file'}_export.xlsx",
+                    file_name=f"{source_label.replace(' ', '_')}_export.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"download_excel_{selected_collection_name if selected_collection_name else 'local'}"
                 )
@@ -219,7 +352,7 @@ with app_tab:
                 st.sidebar.download_button(
                     label="Télécharger le rapport HTML",
                     data=html_content,
-                    file_name="rapport_ccr-b.html",
+                    file_name="rapport_datasolution.html",
                     mime="text/html"
                 )
             else:
@@ -242,10 +375,9 @@ with app_tab:
                 unsafe_allow_html=True
             )
         else:
-            st.warning(f"La colonne '_index' n'a pas été trouvée dans les données de '{selected_collection_name}'. Impossible de compter les soumissions.")
+            st.warning(f"La colonne '_index' n'a pas été trouvée dans les données de '{source_label}'. Impossible de compter les soumissions.")
 
-        # Display column names
-        st.write(f"Colonnes présentes dans la collecte '{selected_collection_name if selected_collection_name else 'fichier local'}':")
+        st.write(f"Colonnes présentes dans '{source_label}':")
         st.write(data.columns.tolist()) # Display columns as a list
 
         # Define categorical and numerical columns
@@ -593,83 +725,57 @@ with app_tab:
 
 
 with manual_tab:
-    st.markdown("## 📘 Manuel d'Utilisation de l'Application CCR-B")
+    st.markdown(f"## 📘 Manuel d'Utilisation — {APP_NAME}")
 
-    st.markdown("""
-Bienvenue dans l'application **CCR-B Tableau de Bord des Collectes KoboToolbox**.
-Cette application facilite l'exploitation et l'analyse des données collectées via KoboToolbox.
+    st.markdown(f"""
+Bienvenue dans **{APP_NAME}**.
+Cette application facilite l'exploitation et l'analyse de vos données collectées.
 
 ---
 
 ### 🔹 1️⃣ Sélection des Données
 
-- **Source de Données** : Choisissez la source de données souhaitée dans la barre latérale :
-    - **Mode API KoboToolbox** : Charge les données directement depuis les serveurs KoboToolbox en utilisant les URLs préconfigurées. Sélectionnez la collecte à analyser dans la liste déroulante.
-    - **Mode Fichier Local** : Vous permet de charger un fichier Excel (.xlsx) depuis votre ordinateur. Utilisez le bouton "Déposez votre fichier Excel ici".
+- **URL API KoboToolbox** : charge les données depuis une URL d'export Kobo (.xlsx ou .csv), prédéfinie ou personnalisée.
+- **Fichier Excel** : importez un fichier `.xlsx` — les en-têtes sont détectés automatiquement.
+- **Fichier CSV** : importez un fichier `.csv` — la première ligne devient les en-têtes.
+- **Texte simple** : collez des données tabulaires (CSV, point-virgule ou tabulation) — l'app crée le DataFrame avec les en-têtes.
 
-- **Actualisation des Données** : Cliquez sur le bouton "Actualiser les données" dans la barre latérale pour recharger les données depuis la source sélectionnée.
+- **Actualisation** : bouton « Actualiser les données » dans la barre latérale.
 
 ---
 
-### 🔹 2️⃣ Analyse et Visualisation des Données
+### 🔹 2️⃣ Analyse et Visualisation
 
-Cette section vous permet d'effectuer différentes analyses sur les données chargées. Vous pouvez ajouter plusieurs analyses de différents types.
-
-- **Ajouter une Analyse Tableau Agrégé** : Crée une section pour configurer et afficher un tableau de données agrégées (similaire à un tableau croisé dynamique).
-    - Sélectionnez les variables catégorielles pour le regroupement.
-    - Sélectionnez la variable numérique à agréger.
-    - Choisissez la méthode d'agrégation (compte, moyenne, somme, min, max, écart type).
-    - Cliquez sur "Exécuter l'Analyse Tableau Agrégé" pour afficher le résultat.
-
-- **Ajouter une Analyse Graphique** : Crée une section pour configurer et afficher un graphique.
-    - Choisissez le type de graphique (Barres, Lignes, Nuage de points, Histogramme, Boîte à moustaches, Violon, Carte de chaleur, Nuage de points 3D, Paire de graphiques).
-    - Sélectionnez les variables pour les axes X et Y.
-    - Vous pouvez également sélectionner des variables optionnelles pour la couleur et la taille des points (selon le type de graphique).
-    - Cliquez sur "Exécuter l'Analyse Graphique" pour afficher le graphique interactif.
-
-- **Ajouter une Analyse Statistique Descriptive** : Crée une section pour afficher les statistiques descriptives (compte, moyenne, écart type, min, max, quartiles) pour les colonnes numériques sélectionnées.
-    - Sélectionnez les colonnes numériques pour lesquelles vous souhaitez obtenir les statistiques descriptives.
-    - Cliquez sur "Exécuter l'Analyse Statistique Descriptive" pour afficher le tableau de statistiques.
-
-- **Analyses Statistiques Avancées** : Cette section (actuellement temporaire et en cours d'intégration complète) propose des analyses statistiques plus poussées comme les Tests T, ANOVA, Tests du Chi-carré, Corrélation, Régression Linéaire, ACP, Clustering, et Détection d'Anomalies.
-    - Sélectionnez le type d'analyse avancée souhaitée.
-    - Configurez les paramètres spécifiques à l'analyse sélectionnée.
-    - Cliquez sur le bouton correspondant pour exécuter l'analyse et afficher les résultats.
+- Tableaux agrégés, graphiques Plotly, statistiques descriptives et analyses avancées (Tests T, ANOVA, ACP, clustering…).
 
 ---
 
 ### 🔹 3️⃣ Exportation
 
-- **Exporter le tableau affiché (CSV)** : Télécharge le dernier tableau affiché (soit les colonnes sélectionnées, soit le tableau agrégé) au format CSV.
-- **Exporter le rapport complet (HTML)** : Génère et télécharge un rapport au format HTML incluant les informations générales, les tableaux agrégés et les graphiques qui ont été exécutés.
+- CSV, Excel et rapport HTML.
 
 ---
 
 ### 🔹 4️⃣ Personnalisation
 
-- **Renommer les colonnes** : Dans la barre latérale, sélectionnez une colonne existante et entrez un nouveau nom pour la renommer dans l'application.
+- Renommage des colonnes dans la barre latérale.
 
 ---
 
-### 💡 Conseils
-
-- Utilisez la barre latérale pour configurer la source de données et renommer les colonnes.
-- Ajoutez plusieurs sections d'analyse pour visualiser différentes perspectives de vos données.
-- Interagissez avec les graphiques générés par Plotly pour explorer les données (zoom, pan, survol).
-
----
-
-**👨‍💻 Concepteur : Sidoine YEBADOKPO**
-*Programmeur, Data Scientist et Responsable Suivi Évaluation du CCR-B*
+**👨‍💻 DataSolution — Sidoine YEBADOKPO**
+Programmeur & Data Scientist
 
 📂 [Portfolio](https://huggingface.co/spaces/Sidoineko/portfolio)
-📞 Contact : +2290196911346
-🔗 [Profil LinkedIn](https://www.linkedin.com/in/sidoineko)
+📞 +229 01 96 91 13 46
+🔗 [LinkedIn](https://www.linkedin.com/in/sidoineko)
 """)
 
 with chat_tab:
     st.markdown("## Chat avec Gemini")
     st.write("Posez des questions sur les données ou les analyses effectuées.")
+
+    if not google_api_key:
+        st.warning("Clé API Google Gemini non configurée. Ajoutez GOOGLE_API_KEY dans .env ou les Secrets Streamlit.")
 
     # Initialize chat history in session state if it doesn't exist
     if 'chat_history' not in st.session_state:
@@ -683,7 +789,7 @@ with chat_tab:
     # Add a text input field for the user to type their questions
     user_question = st.chat_input("Votre question :")
 
-    if user_question:
+    if user_question and google_api_key:
         # Add user question to chat history
         st.session_state.chat_history.append({"role": "user", "content": user_question})
 
