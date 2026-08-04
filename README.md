@@ -18,20 +18,25 @@ Application Streamlit personnelle pour visualiser et analyser des données multi
 - **Main file** : `dashboard_app.py`
 - **Secrets** : `GOOGLE_API_KEY` (pour le chat Gemini)
 
-## Fichiers requis
+## Fichiers du projet
 
-- `dashboard_app.py` — application principale
-- `logo_sky.png` — logo DataSolution
-- `report_template.html` — template rapport HTML
-- `requirements.txt` — dépendances
+| Fichier | Rôle |
+|---------|------|
+| `dashboard_app.py` | Application principale Streamlit |
+| `smart_analysis.py` | Moteur d'analyse intelligente (profiling, insights) |
+| `ai_interpreter.py` | Interprétation IA multi-fournisseurs |
+| `report_builder.py` | Export rapport Word (.docx) |
+| `ccc_analysis_tool.py` | Pipeline d'analyse avancée (PCA, clustering, stats) |
+| `logo_sky.png` | Logo |
+| `requirements.txt` | Dépendances Python |
 
 ## Fonctionnalités
 
-- Chargement des données depuis l'API KoboToolbox ou un fichier Excel local
-- Visualisations interactives (Plotly)
-- Statistiques agrégées et analyses (PCA, clustering, régression)
-- Export CSV, Excel et rapport HTML
-- Chat IA avec Google Gemini
+- **Sources** : URL KoboToolbox, Excel, CSV, texte tabulaire
+- **Analyse intelligente** : profiling auto, insights, dashboard smart
+- **Analyses avancées** : tableaux agrégés, graphiques Plotly, stats, SQL naturel, PCA, clustering
+- **IA** : Gemini, OpenAI (fallback), interprétation automatique
+- **Export** : CSV, Excel, HTML, PDF, Word
 
 ## Prérequis
 
@@ -94,24 +99,29 @@ git push -u origin main
 
 ```
 DataSolution_viz/
-├── dashboard_app.py       # Application principale
-├── report_template.html   # Template du rapport HTML
-├── PP CCRB.png            # Logo CCR-B
-├── requirements.txt       # Dépendances Python
-├── render.yaml            # Configuration Render
-├── .env.example           # Modèle de variables d'environnement
-├── .gitignore
-├── .streamlit/
-│   └── config.toml
+├── dashboard_app.py
+├── smart_analysis.py
+├── ai_interpreter.py
+├── report_builder.py
+├── ccc_analysis_tool.py
+├── logo_sky.png
+├── requirements.txt
+├── render.yaml
+├── .env.example
 └── README.md
 ```
 
 ## Variables d'environnement
 
-| Variable         | Obligatoire | Description                          |
-|------------------|-------------|--------------------------------------|
-| `GOOGLE_API_KEY` | Oui         | Clé API Google Gemini pour le chat   |
-| `GEMINI_MODEL`   | Non         | Modèle Gemini (défaut : gemini-1.5-flash) |
+| Variable | Obligatoire | Description |
+|----------|-------------|-------------|
+| `GOOGLE_API_KEY` | Recommandé | Clé API Google Gemini |
+| `OPENAI_API_KEY` | Non | Fallback si quota Gemini |
+| `KOBOTOOLBOX_TOKEN` | Non | Formulaires Kobo privés |
+| `GEMINI_MODEL` | Non | Modèle Gemini (défaut : gemini-1.5-flash) |
+| `LOCAL_GEMMA_PATH` | Non | Modèle local (laisser vide sur le cloud) |
+
+> Aucune clé API n'est stockée dans le code — configurez-les via `.env` (local) ou **Secrets** (Streamlit Cloud).
 
 ## Licence
 
