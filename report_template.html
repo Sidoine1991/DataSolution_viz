@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Rapport CCR-B</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        h1, h2 { text-align: center; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    </style>
+</head>
+<body>
+    <h1>Conseil de Concertation des riziculteurs du Bénin (CCR-B)</h1>
+    <h2>Tableau de bord des collectes KoboToolbox</h2>
+    <p>Dernière synchronisation des données : {{ last_sync }}</p>
+
+    <h3>Nombre de formulaires soumis : {{ num_submissions }}</h3>
+
+
+    <!-- Section pour les graphiques -->
+    <div id="charts">
+        {{ charts }}
+    </div>
+</body>
+</html>
